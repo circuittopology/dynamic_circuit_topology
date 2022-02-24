@@ -97,8 +97,8 @@ def find_max_lifetime_perres(dyn_cmap_flat, len_dataset):
     max_dist=np.copy(life_time_max_arr[life_time_max_arr != 0])
     return max_dist, life_time_max_arr* 0.005, life_time_max*0.005
     
-#Create contact lifetime distribution    
-def lifetime_distribution(max_dist):
+#Create contact lifetime distribution        
+def lifetime_distribution(max_dist, start_fit):
     ax = sns.kdeplot(max_dist*0.005, bw_adjust=2)
     x = ax.lines[0].get_xdata() # Get the x data of the distribution
     y = ax.lines[0].get_ydata() # Get the y data of the distribution
@@ -106,9 +106,8 @@ def lifetime_distribution(max_dist):
     array=np.array(peak[0])
     maxima=x[array]
     
-    start_phys=20
-    x=x[start_phys:-1]
-    y=y[start_phys:-1]
+    x=x[start_fit:-1]
+    y=y[start_fit:-1]
     
     #Fit of the distribution
     fit_dist, optim=fit(x,y)
@@ -145,7 +144,7 @@ def save_figures(plot,path, terminus, run, name_file):
     
     
 #Creates a lifetime filter for contact maps and saves it into a csv file
-def create_mask(max_lifetime_array, life_filter, thresh, parameters, path_mask, save_mask=0):
+def create_mask(max_lifetime_array, life_filter, thresh, shape, path_mask, split = False, save_mask = False):
     thresh1=thresh[0]
     thresh2=thresh[1]
     if (life_filter == 'long_life'):
@@ -160,23 +159,23 @@ def create_mask(max_lifetime_array, life_filter, thresh, parameters, path_mask, 
         cut[cut>thresh1]=0
         
     indexes_ravelled= np.nonzero(cut)
-    x,y= np.unravel_index(indexes_ravelled, (parameters[3], parameters[3]), order='C')
-    mask=np.zeros((parameters[3], parameters[3]))
+    x,y= np.unravel_index(indexes_ravelled, (shape, shape), order='C')
+    mask=np.zeros((shape, shape))
     mask[x,y]=1
     
-    mask_N = mask[parameters[0]:parameters[1], parameters[0]:parameters[1]]
-    mask_C = mask[parameters[2]:parameters[3], parameters[2]:parameters[3]] 
+    if split:
+        mask_split1 = np.copy(mask[0:split, 0:split])
+        mask_split2 = np.copy(mask[split:mask.shape[0], split:mask.shape[1]])
+        
         
     if save_mask:    
-        np.savetxt('{}/{}_mask.csv'.format(path_mask, life_filter), mask,delimiter=",")
-        np.savetxt('{}/{}_mask_N.csv'.format(path_mask, life_filter), mask_N,delimiter=",")
-        np.savetxt('{}/{}_mask_C.csv'.format(path_mask, life_filter), mask_C,delimiter=",")    
-    
-    plt.figure()
-    plt.title(life_filter)
-    plt.imshow(mask, 'Blues_r')
-    plt.xlabel('Residues')
-    plt.ylabel('Residues')
+        np.savetxt('{}/{}_mask.csv'.format(path_mask, life_filter), mask,delimiter=",") 
+        if split:
+            np.savetxt('{}/{}_mask_{}.csv'.format(path_mask, life_filter, 'split1'), mask_split1, delimiter=",")
+            np.savetxt('{}/{}_mask_{}.csv'.format(path_mask, life_filter, 'split2'), mask_split2, delimiter=",")
+        
+    return mask
+
     
 
 #Function that computes all the lifetimes that each contact has during the MD run
@@ -255,7 +254,7 @@ def avg_lifetime_perres(all_lifetimes,max_lifetime_array, lifetime_matrix,C_term
     return avg_per_residue, max_per_residue
 
 #Plot C factors
-def plot_Cfactors(avg_perres, max_perres, path_figures, run, savefig=0):
+def plot_Cfactors(avg_perres, max_perres, path_figures, savefig=0):
     a = plt.figure()
     plt.title('C FACTOR')
     plt.plot(avg_perres)
@@ -269,26 +268,26 @@ def plot_Cfactors(avg_perres, max_perres, path_figures, run, savefig=0):
     plt.ylabel('Max lifetime (us)')
     
     if savefig:
-        a.savefig('{}/all protein/{}/C_factor.jpg'.format(path_figures, run))
-        b.savefig('{}/all protein/{}/Cstar_factor.jpg'.format(path_figures, run))
-        a.savefig('{}/all protein/{}/C_factor.eps'.format(path_figures, run))
-        b.savefig('{}/all protein/{}/Cstar_factor.eps'.format(path_figures, run))
-    return 0
+        a.savefig('{}/C_factor.jpg'.format(path_figures))
+        b.savefig('{}/Cstar_factor.jpg'.format(path_figures))
+        a.savefig('{}/C_factor.eps'.format(path_figures))
+        b.savefig('{}/Cstar_factor.eps'.format(path_figures))
+    return a, b
  
 #Function to store C factor into a csv file
-def save_cfactor(avg_perres, max_perres, path_Cfactor, run):
+def save_cfactor(avg_perres, max_perres, path_Cfactor):
     c_factor={'C factor': avg_perres}
     Cfactor=pd.DataFrame(c_factor)
-    Cfactor.to_csv('{}/{}/C_factor.csv'.format(path_Cfactor,run))
+    Cfactor.to_csv('{}/C_factor.csv'.format(path_Cfactor))
 
     cstar_factor={'Cstar factor': max_perres}
     Cstarfactor=pd.DataFrame(cstar_factor)
-    Cstarfactor.to_csv('{}/{}/Cstar_factor.csv'.format(path_Cfactor,run))
+    Cstarfactor.to_csv('{}/Cstar_factor.csv'.format(path_Cfactor))
     
 
 #Function that calculates (average) contact range per residue, max contact range per residue and average contact
 #range per residue weighted by contact lifetime.
-def avg_contact_range(all_lifetimes,max_lifetime_array, lifetime_matrix,C_termin_end):
+def avg_contact_range(all_lifetimes,max_lifetime_array, lifetime_matrix, shape):
     non_zero_index= np.array(np.nonzero(max_lifetime_array))
     mean_life_arr=np.zeros(len(all_lifetimes)) 
     for t in range(len(mean_life_arr)):
@@ -301,16 +300,16 @@ def avg_contact_range(all_lifetimes,max_lifetime_array, lifetime_matrix,C_termin
     for t in range(mean_life_arr.shape[0]):
         arr_mean[non_zero_index[0,t]]=mean_life_arr[t]
         
-    map_mean=np.zeros((C_termin_end,C_termin_end))
+    map_mean=np.zeros((shape,shape))
     indexes_ravelled= np.array(np.nonzero(arr_mean))
     
     for t in range(len(indexes_ravelled[0,:])):
-        x,y= np.unravel_index(indexes_ravelled[0,t], (C_termin_end,C_termin_end), order='C')
+        x,y= np.unravel_index(indexes_ravelled[0,t], (shape,shape), order='C')
         val=arr_mean[indexes_ravelled[0,t]]
         if val>0:
             map_mean[x,y]=val
             
-    range_per_residue=np.zeros(C_termin_end)
+    range_per_residue=np.zeros(shape)
     for t in range(len(range_per_residue)):
         line=map_mean[t,:]
         line_indexes=np.nonzero(line)
@@ -318,14 +317,14 @@ def avg_contact_range(all_lifetimes,max_lifetime_array, lifetime_matrix,C_termin
         line_indexes=np.abs(line_indexes-(np.ones(len(line_indexes))*t))
         range_per_residue[t]=np.mean(line_indexes)
         
-    max_range_per_residue=np.zeros(C_termin_end)
+    max_range_per_residue=np.zeros(shape)
     for t in range(len(max_range_per_residue)):
         line=map_mean[t,:]
         line_indexes=np.nonzero(line)
         line_indexes=np.abs(line_indexes-(np.ones(len(line_indexes))*t))
         max_range_per_residue[t]=np.max(line_indexes)    
 
-    weightrange_per_residue=np.zeros(C_termin_end)
+    weightrange_per_residue=np.zeros(shape)
     for t in range(len(range_per_residue)):
         line=map_mean[t,:]
         line_indexes=np.nonzero(line)
@@ -339,7 +338,7 @@ def avg_contact_range(all_lifetimes,max_lifetime_array, lifetime_matrix,C_termin
 
 #Function that plots the spatial range of contacts. Three modes are available for the plot,'weighted', 'average',
 # and 'max'.
-def plot_contact_range(ranges, parameters, path_figures, run, mode, savefig = 0):
+def plot_contact_range(ranges, path_figures, mode, savefig = 0):
     
     if (mode == 'weighted'):
         contact_range= ranges[2]
@@ -348,20 +347,17 @@ def plot_contact_range(ranges, parameters, path_figures, run, mode, savefig = 0)
     if (mode == 'average'):
         contact_range= ranges[0]    
     
-    range_N=np.copy(contact_range[parameters[0]:parameters[1]])
-    range_C=np.copy(contact_range[parameters[2]:parameters[3]])
     
     plot= plt.figure()
-    sns.histplot(range_N, color='pink', label= 'N terminus')
-    sns.histplot(range_C, label= 'C terminus')
-    
-    plt.title('Contact range per residue, {}'.format(run))
+    sns.histplot(contact_range, color='pink', label= 'space range')
+
+    plt.title('Contact range per residue')
     plt.xlabel('Average contact range (residues)')
     plt.legend()
     
     if savefig:
-        plot.savefig('{}/all protein/{}/contact_range_{}.jpg'.format(path_figures, run, mode))
-        plot.savefig('{}/all protein/{}/contact_range_{}.eps'.format(path_figures, run, mode))
+        plot.savefig('{}/contact_range_{}.jpg'.format(path_figures, mode))
+        plot.savefig('{}/contact_range_{}.eps'.format(path_figures, mode))
     return plot
 
 #Calculates the threshold for long range contacts
@@ -377,49 +373,6 @@ def calculate_threshold(ranges, mode):
     threshold= np.mean(contact_range)+np.std(contact_range)
     return threshold
 
-#Calculates statistics for N terminus and C terminus contact range distribution
-def distribution_stats_mode(ranges, parameters, mode):
-    
-    if (mode == 'weighted'):
-        contact_range= ranges[2]
-    if (mode == 'max'):
-        contact_range= ranges[1]
-    if (mode == 'average'):
-        contact_range= ranges[0]    
-    
-    range_N=np.copy(contact_range[parameters[0]:parameters[1]])
-    range_C=np.copy(contact_range[parameters[2]:parameters[3]])
-    
-    shapiro_N=ss.shapiro(range_N)
-    shapiro_C=ss.shapiro(range_C)
-    
-    levene = ss.levene(range_N, range_C)
-    
-    mann= ss.mannwhitneyu(range_N, range_C)
-    ttest= ss.ttest_ind(range_N, range_C)
-    
-    print('N terminus:')
-    print(shapiro_N)
-    print('C terminus:')
-    print(shapiro_C)
-    print('Comparison distributions:')
-    print(levene)
-    print(mann)
-    print(ttest)
-    
-    return 0
-
-#Set layout of the graphs
-def set_layout(SMALL_SIZE = 13, MEDIUM_SIZE = 14, BIGGER_SIZE = 20):
-
-
-    plt.rc('font', size=SMALL_SIZE)          # controls default text sizes
-    plt.rc('axes', titlesize=MEDIUM_SIZE)     # fontsize of the axes title
-    plt.rc('axes', labelsize=MEDIUM_SIZE)    # fontsize of the x and y labels
-    plt.rc('xtick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
-    plt.rc('ytick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
-    plt.rc('legend', fontsize=SMALL_SIZE)    # legend fontsize
-    plt.rc('figure', titlesize=BIGGER_SIZE)
     
     
 #Arrange C factor from different runs in a dataframe
